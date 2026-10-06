@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.1.0 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.1.1 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -137,6 +137,7 @@ class HolmCoversCard extends HTMLElement {
       .q:active { transform:scale(.94); }
       .q ha-icon { --mdc-icon-size:21px; }
       @container (max-width: 380px) { .q { width:36px; } .qb { gap:3px; } }
+      @container (max-width: 300px) { .top { grid-template-columns:auto 1fr; row-gap:8px; padding:8px 8px 8px 10px; } .qb { grid-column:1 / -1; align-self:auto; } .qb .q { flex:1; width:auto; height:34px; } .mb { max-width:none; } }
       .q:hover, .pr:hover { background:color-mix(in srgb, var(--primary-color, #0abfbf) 25%, transparent); }
       .bt { border:none; cursor:pointer; width:36px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center;
             background:color-mix(in srgb, var(--primary-text-color) 8%, transparent); color:var(--primary-text-color); }
