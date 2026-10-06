@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.0.0 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.1.0 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -7,6 +7,7 @@
 // groups:
 //   - name: Rez-de-chaussée   icon: mdi:home-floor-0
 //     entities: [{ entity: cover.salon_1, name: Salon 1 }]
+// ou, pour un volet seul :  entity: cover.bureau   name: Volets du bureau
 (() => {
 const OPEN = "#0abfbf", MOVE = "#e3a21a";
 const pos = (s) => { if (!s) return null; const p = s.attributes.current_position; if (p !== undefined && p !== null) return Number(p); return s.state === "open" ? 100 : s.state === "closed" ? 0 : null; };
@@ -22,12 +23,13 @@ const shutter = (p, col) => {
 
 class HolmCoversCard extends HTMLElement {
   setConfig(c) {
-    if (!c || !Array.isArray(c.groups) || !c.groups.length) throw new Error("holm-covers-card : 'groups' est requis");
-    this._c = { title: "Volets", show_frame: true, ...c };
+    if (!c || (!("entity" in c) && (!Array.isArray(c.groups) || !c.groups.length))) throw new Error("holm-covers-card : 'entity' (volet seul) ou 'groups' est requis");
+    this._c = "entity" in c ? { show_frame: true, ...c, groups: [] } : { title: "Volets", show_frame: true, ...c };
+    this._solo = "entity" in c;
     this._open = null; this._sig = null;
     if (this._hass) this._render();
   }
-  _ents() { return this._c.groups.flatMap((g) => (g.entities || []).map((e) => (typeof e === "string" ? { entity: e } : e))); }
+  _ents() { if (this._solo) return [{ entity: this._c.entity, name: this._c.name }]; return this._c.groups.flatMap((g) => (g.entities || []).map((e) => (typeof e === "string" ? { entity: e } : e))); }
   set hass(h) {
     this._hass = h;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
@@ -63,7 +65,7 @@ class HolmCoversCard extends HTMLElement {
       </div>
       ${open ? `<div class="pn">
         ${canPos(s) ? `<div class="sl" data-act="slide"><div class="tr"><i style="width:${p ?? 0}%"></i></div><b style="left:${p ?? 0}%"><span>${p ?? 0}</span></b></div>
-          ${[0, 25, 50, 75, 100].map((v) => `<button class="pr" data-v="${v}">${v}</button>`).join("")}` : `<span class="pl">Position non réglable pour ce volet</span>`}
+          <div class="prs">${[0, 25, 50, 75, 100].map((v) => `<button class="pr" data-v="${v}">${v}</button>`).join("")}</div>` : `<span class="pl">Position non réglable pour ce volet</span>`}
       </div>` : ""}
     </div>`;
   }
@@ -80,6 +82,13 @@ class HolmCoversCard extends HTMLElement {
           <button class="gb" data-g="${gi}" data-act="gopen" title="Tout ouvrir"><ha-icon icon="mdi:arrow-up"></ha-icon></button></div>
         <div class="list">${ents.map((e) => this._row(e)).join("")}</div></div>`;
     }).join("");
+    const body = this._solo && !c.entity ? `<div class="hint">Choisissez un volet dans l'éditeur</div>` : this._solo ? `<div class="list">${this._row(all[0])}</div>` : `
+      <div class="hd"><div class="tt">${c.title || ""}</div>
+        <div class="sm"><b>${nOpen}</b>/${st.length} ouverts${nMove ? ` · <b style="color:${MOVE}">${nMove} en mouvement</b>` : ""}</div>
+        ${c.all ? `<div class="all"><button class="ab" data-act="aclose"><ha-icon icon="mdi:arrow-down"></ha-icon>Tous</button><button class="ab" data-act="aopen"><ha-icon icon="mdi:arrow-up"></ha-icon>Tous</button></div>` : ""}
+      </div>
+      ${groups}
+      <div class="hint">Appui long sur un volet : position précise</div>`;
     this.shadowRoot.innerHTML = `
     <style>
       :host { display:block; }
@@ -99,10 +108,12 @@ class HolmCoversCard extends HTMLElement {
       .gh > ha-icon { --mdc-icon-size:15px; }
       .gh em { font-style:normal; font-weight:500; text-transform:none; letter-spacing:0; margin-left:auto; }
       .gb { border:none; background:color-mix(in srgb, var(--primary-text-color) 6%, transparent); color:var(--primary-text-color); border-radius:8px; width:28px; height:24px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-      .list { display:grid; grid-template-columns:1fr; gap:5px; }
+      .list { display:grid; grid-template-columns:1fr; gap:5px; align-items:start; }
+      ha-card.solo { padding:4px; }
+      ha-card.solo:not(.noframe) .rw:not(.ex) { background:none; }
       @container (min-width: 620px) { .list { grid-template-columns:1fr 1fr; } }
       .rw { border-radius:12px; background:color-mix(in srgb, var(--primary-text-color) 5%, transparent); border:1px solid transparent; transition:background .2s, border-color .2s; overflow:hidden; }
-      .rw.ex { grid-column:1 / -1; border-color:color-mix(in srgb, var(--c) 45%, transparent); background:color-mix(in srgb, var(--c) 8%, transparent); }
+      .rw.ex { border-color:color-mix(in srgb, var(--c) 45%, transparent); background:color-mix(in srgb, var(--c) 8%, transparent); }
       .rw.na { opacity:.45; }
       .top { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:5px 6px 5px 10px; cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:manipulation; }
       .top:active { background:color-mix(in srgb, var(--primary-text-color) 5%, transparent); }
@@ -113,8 +124,12 @@ class HolmCoversCard extends HTMLElement {
       .st { font-size:11.5px; color:var(--secondary-text-color); white-space:nowrap; }
       .mb { height:3px; margin-top:4px; max-width:120px; border-radius:3px; background:color-mix(in srgb, var(--primary-text-color) 10%, transparent); overflow:hidden; }
       .mb i { display:block; height:100%; width:var(--p); background:var(--c); border-radius:3px; transition:width .6s ease; }
-      .pn { display:flex; align-items:center; gap:8px; padding:6px 12px 10px; flex-wrap:wrap; }
-      .pn .sl { flex:1; min-width:140px; } .pl { font-size:11px; color:var(--secondary-text-color); }
+      .rw { container-type:inline-size; }
+      .pn { display:flex; align-items:center; gap:6px 10px; padding:16px 18px 10px; flex-wrap:wrap; }
+      .pn .sl { flex:1 1 100%; min-width:0; } .pl { font-size:11px; color:var(--secondary-text-color); }
+      .prs { display:flex; gap:6px; flex:1 1 100%; justify-content:space-between; }
+      .prs .pr { flex:1; max-width:56px; }
+      @container (min-width: 520px) { .pn .sl { flex:1 1 auto; } .prs { flex:0 0 auto; } .prs .pr { flex:0 0 auto; } }
       .pr { font:inherit; font-size:11px; font-weight:600; border:none; cursor:pointer; border-radius:8px; padding:4px 7px; background:color-mix(in srgb, var(--primary-text-color) 8%, transparent); color:var(--primary-text-color); }
       .qb { display:flex; gap:4px; align-self:stretch; align-items:center; }
       .q { border:none; cursor:pointer; width:42px; height:36px; border-radius:11px; display:flex; align-items:center; justify-content:center; padding:0;
@@ -134,13 +149,7 @@ class HolmCoversCard extends HTMLElement {
       .sp { height:32px; }
       .hint { font-size:10.5px; color:var(--secondary-text-color); text-align:center; margin-top:6px; opacity:.7; }
     </style>
-    <ha-card class="${c.show_frame === false ? "noframe" : ""}">
-      <div class="hd"><div class="tt">${c.title || ""}</div>
-        <div class="sm"><b>${nOpen}</b>/${st.length} ouverts${nMove ? ` · <b style="color:${MOVE}">${nMove} en mouvement</b>` : ""}</div>
-        ${c.all ? `<div class="all"><button class="ab" data-act="aclose"><ha-icon icon="mdi:arrow-down"></ha-icon>Tous</button><button class="ab" data-act="aopen"><ha-icon icon="mdi:arrow-up"></ha-icon>Tous</button></div>` : ""}
-      </div>
-      ${groups}
-      <div class="hint">Appui long sur un volet : position précise</div>
+    <ha-card class="${c.show_frame === false ? "noframe" : ""} ${this._solo ? "solo" : ""}">${body}
     </ha-card>`;
     this._bind();
   }
@@ -179,11 +188,11 @@ class HolmCoversCard extends HTMLElement {
   }
   static getConfigElement() { return document.createElement("holm-covers-card-editor"); }
   static getStubConfig() { return { title: "Volets", groups: [{ name: "Rez-de-chaussée", icon: "mdi:home-floor-0", entities: [] }] }; }
-  getCardSize() { return 6; }
-  getGridOptions() { return { columns: 12, rows: "auto", min_columns: 4 }; }
+  getCardSize() { return this._solo ? 1 : 6; }
+  getGridOptions() { return this._solo ? { columns: 6, rows: "auto", min_columns: 4 } : { columns: 12, rows: "auto", min_columns: 4 }; }
 }
 
-const L = { title: "Titre", all: "Commande « Tous » (volet ou groupe, optionnel)", show_frame: "Afficher le cadre de la carte", name: "Nom du groupe", icon: "Icône", entities: "Volets" };
+const L = { mode: "Affichage", entity: "Volet", vname: "Nom affiché (optionnel)", title: "Titre", all: "Commande « Tous » (volet ou groupe, optionnel)", show_frame: "Afficher le cadre de la carte", name: "Nom du groupe", icon: "Icône", entities: "Volets" };
 class HolmCoversCardEditor extends HTMLElement {
   setConfig(c) { const j = JSON.stringify(c); this._config = JSON.parse(j); if (j === this._last && this._built) return; this._build(); }
   set hass(h) { this._hass = h; if (!this._built) this._build(); else this.querySelectorAll("ha-form").forEach((f) => (f.hass = h)); }
@@ -192,10 +201,33 @@ class HolmCoversCardEditor extends HTMLElement {
     f.addEventListener("value-changed", (ev) => { ev.stopPropagation(); cb(ev.detail.value); }); return f; }
   _build() {
     if (!this._hass || !this._config) return;
-    this._built = true; const c = this._config; c.groups = c.groups || [];
+    this._built = true; const c = this._config;
+    const modeForm = this._form([{ name: "mode", selector: { select: { mode: "box", options: [{ value: "groups", label: "Groupes de volets" }, { value: "single", label: "Volet seul" }] } } }],
+      { mode: c.entity !== undefined ? "single" : "groups" }, (v) => {
+        const cur = this._config.entity !== undefined ? "single" : "groups"; if (v.mode === cur) return;
+        if (v.mode === "single") {
+          const first = (this._config.groups || []).flatMap((g) => g.entities || [])[0];
+          const fe = first ? (typeof first === "string" ? { entity: first } : first) : null;
+          this._config = { type: this._config.type, entity: fe ? fe.entity : "", ...(fe && fe.name ? { name: fe.name } : {}), ...(this._config.show_frame === false ? { show_frame: false } : {}) };
+        } else {
+          const e = this._config.entity;
+          this._config = { type: this._config.type, title: "Volets", groups: [{ name: "", entities: e ? [this._config.name ? { entity: e, name: this._config.name } : { entity: e }] : [] }], ...(this._config.show_frame === false ? { show_frame: false } : {}) };
+        }
+        this._emit(); this._build(); });
+    if (c.entity !== undefined) {
+      this.innerHTML = `<div class="mode"></div><div class="gen"></div>`;
+      this.querySelector(".mode").appendChild(modeForm);
+      this.querySelector(".gen").appendChild(this._form([{ name: "entity", selector: { entity: { domain: ["cover"] } } }, { type: "grid", name: "", schema: [
+        { name: "vname", selector: { text: {} } }, { name: "show_frame", selector: { boolean: {} } }] }], { entity: c.entity, vname: c.name || "", show_frame: c.show_frame !== false }, (v) => {
+        this._config.entity = v.entity || ""; if (v.vname) this._config.name = v.vname; else delete this._config.name;
+        if (v.show_frame === false) this._config.show_frame = false; else delete this._config.show_frame; this._emit(); }));
+      return;
+    }
+    c.groups = c.groups || [];
     this.innerHTML = `<style>.it{border:1px solid var(--divider-color);border-radius:12px;padding:8px 12px 4px;margin:10px 0}.ih{display:flex;justify-content:space-between;font-weight:600;margin-bottom:4px}
       .ih span{display:flex;gap:4px} button{cursor:pointer;background:none;border:1px solid var(--divider-color);color:var(--primary-text-color);border-radius:8px;padding:4px 8px}.add{width:100%;padding:8px}
       .hint{font-size:12px;color:var(--secondary-text-color)}</style><div class="gen"></div><div class="items"></div><button class="add">+ Ajouter un groupe</button>`;
+    this.prepend(modeForm);
     this.querySelector(".gen").appendChild(this._form([{ name: "title", selector: { text: {} } }, { type: "grid", name: "", schema: [
       { name: "all", selector: { entity: { domain: ["cover"] } } }, { name: "show_frame", selector: { boolean: {} } }] }], { show_frame: true, ...c }, (v) => {
       Object.assign(this._config, v); if (!v.all) delete this._config.all; if (v.show_frame !== false) delete this._config.show_frame; this._emit(); }));
@@ -219,7 +251,5 @@ class HolmCoversCardEditor extends HTMLElement {
 if (!customElements.get("holm-covers-card-editor")) customElements.define("holm-covers-card-editor", HolmCoversCardEditor);
 if (!customElements.get("holm-covers-card")) customElements.define("holm-covers-card", HolmCoversCard);
 window.customCards = window.customCards || [];
-window.customCards.push({ type: "holm-covers-card", name: "HOLM – Volets", description: "Volets compacts par étage : appui court ouvre/ferme, appui long affiche le curseur de position", preview: false });
+window.customCards.push({ type: "holm-covers-card", name: "HOLM – Volets", description: "Volets compacts par étage ou volet seul : appui court ouvre/ferme, appui long affiche le curseur de position", preview: false });
 })();
-
-console.info("%c HOLM-COVERS %c 1.0.0 ", "background:#0abfbf;color:#111;border-radius:3px 0 0 3px", "background:#123;color:#fff;border-radius:0 3px 3px 0");
