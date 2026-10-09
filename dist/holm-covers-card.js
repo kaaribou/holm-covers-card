@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.1.1 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.1.2 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -9,6 +9,26 @@
 //     entities: [{ entity: cover.salon_1, name: Salon 1 }]
 // ou, pour un volet seul :  entity: cover.bureau   name: Volets du bureau
 (() => {
+// Garde la position de défilement pendant un nouveau rendu complet de la carte (iPhone / iPad : WebKit n'a pas de
+// « scroll anchoring » et la page remontait d'un coup). On fige la hauteur de la carte et on remet le défilement en place.
+const keepScroll = (host, fn) => {
+  const saved = [];
+  let n = host;
+  while (n) {
+    n = n.assignedSlot || n.parentNode || n.host;
+    if (n && n.nodeType === 1 && n.scrollHeight > n.clientHeight) saved.push([n, n.scrollTop]);
+  }
+  const se = document.scrollingElement;
+  if (se) saved.push([se, se.scrollTop]);
+  const h = host.offsetHeight;
+  if (h) host.style.minHeight = `${h}px`;
+  try { return fn(); } finally {
+    const restore = () => saved.forEach(([el, t]) => { if (Math.abs(el.scrollTop - t) > 1) el.scrollTop = t; });
+    restore();
+    requestAnimationFrame(() => { restore(); host.style.minHeight = ""; requestAnimationFrame(restore); });
+    setTimeout(() => { host.style.minHeight = ""; }, 500);   // page en arrière-plan : pas d'image affichée, donc pas de requestAnimationFrame
+  }
+};
 const OPEN = "#0abfbf", MOVE = "#e3a21a";
 const pos = (s) => { if (!s) return null; const p = s.attributes.current_position; if (p !== undefined && p !== null) return Number(p); return s.state === "open" ? 100 : s.state === "closed" ? 0 : null; };
 const moving = (s) => s && (s.state === "opening" || s.state === "closing");
@@ -70,6 +90,9 @@ class HolmCoversCard extends HTMLElement {
     </div>`;
   }
   _render() {
+    return keepScroll(this, () => this._renderNow());
+  }
+  _renderNow() {
     if (!this.shadowRoot || !this._c || !this._hass) return;
     const c = this._c, all = this._ents();
     const st = all.map((e) => this._hass.states[e.entity]).filter(Boolean);
