@@ -15,13 +15,26 @@ HOLM Covers Card affiche vos volets roulants de façon **compacte et horizontale
 - 🧭 **Résumé** : « 5/7 ouverts · 1 en mouvement », par maison et par étage.
 - ⏬ **Commandes groupées** : tout ouvrir / tout fermer par étage, et pour toute la maison avec l'option `all`.
 - 🪟 **Volet seul** : une carte d'une seule ligne pour un volet, sans titre ni groupe.
-- 👆 **Appui court** sur un volet : ouvre, ferme ou stoppe s'il bouge.
+- 👆 **Appui court** sur un volet : ouvre, ferme ou stoppe s'il bouge — ou affiche le curseur, ouvre la fiche, ou ne fait rien (au choix). Faire défiler la page ne déclenche plus rien.
 - 🎚️ **Appui long** : curseur de position précise et raccourcis 0 / 25 / 50 / 75 / 100, directement dans la tuile du volet.
-- 🟧 Couleur ambre pendant le mouvement, turquoise quand c'est ouvert, jauge de position sous chaque volet.
+- 🟧 Couleur ambre pendant le mouvement, turquoise quand c'est ouvert, jauge de position sous chaque volet (sur toute la largeur).
+- 🎨 **Une couleur par groupe** (icônes et titre), fond teinté en option, couleur volet par volet.
+- 📡 **Volets sans retour d'état** : état masqué, ou déduit d'un capteur d'ouverture.
 
 ![Volets par étage](docs/images/volets.png)
 
-### 🆕 Nouveautés de la 1.1.0
+### 🆕 Nouveautés de la 1.2.0
+
+- 🎨 **Une couleur par groupe** : icônes et titre aux couleurs du groupe, avec un **fond teinté** en option (opacité réglable). Une couleur peut aussi être donnée à un volet précis.
+- 📡 **Volets sans retour d'état** (radio…) : masquez « Ouvert / Fermé » et la position (`show_state: false`), ou affichez l'état d'après un **capteur d'ouverture** (`state_entity`, un `binary_sensor`) volet par volet.
+- 👆 **Appui court au choix** (`tap_action`) : ouvrir / fermer, curseur de position, fiche du volet ou rien. Un toucher qui glisse (défilement de la page sur mobile) n'est plus pris pour un appui.
+- 📏 La **jauge de position** s'étend jusqu'aux boutons.
+
+Tout se règle dans l'éditeur, y compris les **réglages par volet** (nom court, capteur d'ouverture, couleur, état).
+
+![Couleurs par groupe, fond teinté, volet sans état et volet avec capteur d'ouverture](docs/images/couleurs-capteurs.png)
+
+### Nouveautés de la 1.1.0
 
 #### 🪟 Un volet seul, sans groupe
 
@@ -74,6 +87,14 @@ groups:
   - name: Étage
     icon: mdi:home-floor-1
     entities: [cover.chambre_1, cover.chambre_2]
+    color: "#e6c229"              # optionnel : couleur du groupe
+    tint: true                    # optionnel : fond teinté
+  - name: Volets radio
+    entities:
+      - entity: cover.salon_rf
+        show_state: false         # pas d'état connu : rien n'est affiché
+      - entity: cover.chambre_rf
+        state_entity: binary_sensor.fenetre_chambre   # état d'après le capteur
 ```
 
 ### Un volet seul
@@ -94,6 +115,10 @@ name: Volets du bureau          # optionnel
 | `all` | Volet (ou groupe de volets) commandé par les boutons « Tous » (mode groupes) | — |
 | `groups` | Groupes : `name`, `icon`, `entities` (entité ou `{ entity, name }`) | — |
 | `show_frame` | Afficher le cadre de la carte | `true` |
+| `show_state` | Afficher l'état (« Ouvert / Fermé », position, jauge) | `true` |
+| `tap_action` | Appui court : `toggle` (ouvrir / fermer / stopper), `position` (curseur), `more-info` (fiche), `none` | `toggle` |
+| Groupe : `color`, `tint`, `tint_opacity` | Couleur du groupe (icônes, titre), fond teinté, opacité du fond (%) | —, `false`, `12` |
+| Volet : `name`, `color`, `state_entity`, `show_state` | Nom court, couleur, capteur d'ouverture qui donne l'état, afficher ou non l'état de ce volet | — |
 
 Il faut soit `entity` (volet seul), soit `groups`. Sans `all`, les boutons « Tous » de l'en-tête ne s'affichent pas ; les boutons de chaque étage restent disponibles.
 
@@ -102,6 +127,8 @@ Il faut soit `entity` (volet seul), soit `groups`. Sans `all`, les boutons « To
 | Problème | Solution |
 |---|---|
 | Pas de curseur à l'appui long | Le volet ne gère pas de position (seulement ouvrir / fermer). |
+| Mes volets n'indiquent pas leur état | `show_state: false` pour ne rien afficher, ou `state_entity` (capteur d'ouverture) pour chaque volet équipé. |
+| L'appui court se déclenche quand je fais défiler la page | Corrigé en 1.2.0 ; vous pouvez aussi choisir **Aucune action** (`tap_action: none`). |
 | Je veux un volet seul sans le fond de la carte | Décochez **Afficher le cadre de la carte** (`show_frame: false`). |
 | La nouvelle version ne s'affiche pas | Videz le cache (Ctrl + F5). |
 

@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.1.2 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.2.0 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -8,6 +8,8 @@
 //   - name: Rez-de-chaussée   icon: mdi:home-floor-0
 //     entities: [{ entity: cover.salon_1, name: Salon 1 }]
 // ou, pour un volet seul :  entity: cover.bureau   name: Volets du bureau
+// Options : show_state (false = ni « Ouvert / Fermé » ni position), tap_action (toggle | none | more-info | position),
+//   par groupe : color, tint, tint_opacity ; par volet : state_entity (capteur d'ouverture), color, show_state
 (() => {
 // Garde la position de défilement pendant un nouveau rendu complet de la carte (iPhone / iPad : WebKit n'a pas de
 // « scroll anchoring » et la page remontait d'un coup). On fige la hauteur de la carte et on remet le défilement en place.
@@ -30,6 +32,9 @@ const keepScroll = (host, fn) => {
   }
 };
 const OPEN = "#0abfbf", MOVE = "#e3a21a";
+const hex2rgb = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ""); if (!m) return undefined; const n = parseInt(m[1], 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const rgb2hex = (a) => (Array.isArray(a) ? "#" + a.map((v) => Number(v).toString(16).padStart(2, "0")).join("") : a);
+const norm = (e) => (typeof e === "string" ? { entity: e } : e);
 const pos = (s) => { if (!s) return null; const p = s.attributes.current_position; if (p !== undefined && p !== null) return Number(p); return s.state === "open" ? 100 : s.state === "closed" ? 0 : null; };
 const moving = (s) => s && (s.state === "opening" || s.state === "closing");
 const canPos = (s) => s && ((s.attributes.supported_features || 0) & 4) === 4;
@@ -46,23 +51,40 @@ class HolmCoversCard extends HTMLElement {
     if (!c || (!("entity" in c) && (!Array.isArray(c.groups) || !c.groups.length))) throw new Error("holm-covers-card : 'entity' (volet seul) ou 'groups' est requis");
     this._c = "entity" in c ? { show_frame: true, ...c, groups: [] } : { title: "Volets", show_frame: true, ...c };
     this._solo = "entity" in c;
+    this._c.tap_action = ["toggle", "none", "more-info", "position"].includes(c.tap_action) ? c.tap_action : "toggle";
     this._open = null; this._sig = null;
     if (this._hass) this._render();
   }
-  _ents() { if (this._solo) return [{ entity: this._c.entity, name: this._c.name }]; return this._c.groups.flatMap((g) => (g.entities || []).map((e) => (typeof e === "string" ? { entity: e } : e))); }
+  _ents() {
+    if (this._solo) { const { entity, name, state_entity, color, show_state } = this._c; return [{ entity, name, state_entity, color, show_state }]; }
+    return this._c.groups.flatMap((g) => (g.entities || []).map((e) => ({ ...norm(e), _g: g })));
+  }
+  // état affiché d'un volet : position du volet, capteur d'ouverture (state_entity), ou rien (show_state: false)
+  _info(e) {
+    const s = this._hass.states[e.entity], show = e.show_state ?? this._c.show_state ?? true;
+    const na = !s || s.state === "unavailable";
+    if (e.state_entity) {
+      const b = this._hass.states[e.state_entity], on = b && ["on", "open", "true"].includes(b.state);
+      const known = !!b && !["unavailable", "unknown"].includes(b.state);
+      return { s, na, mv: false, sensor: true, known, p: known ? (on ? 100 : 0) : null, text: !known ? "État inconnu" : on ? "Ouvert" : "Fermé" };
+    }
+    if (!show) return { s, na, mv: moving(s), sensor: false, known: false, p: null, text: "" };
+    return { s, na, mv: moving(s), sensor: false, known: true, p: pos(s), text: this._stateText(s) };
+  }
   set hass(h) {
     this._hass = h;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
-    const sig = [this._c.all, ...this._ents().map((e) => e.entity)].map((i) => { const s = h.states[i]; return s ? s.state + s.attributes.current_position : ""; }).join("|");
+    const sig = [this._c.all, ...this._ents().flatMap((e) => [e.entity, e.state_entity])].map((i) => { const s = i && h.states[i]; return s ? s.state + s.attributes.current_position : ""; }).join("|");
     if (sig !== this._sig && !this._drag) { this._sig = sig; this._render(); }
   }
   _call(svc, entity, data = {}) { this._hass.callService("cover", svc, { entity_id: entity, ...data }); }
-  _toggle(e) {
-    const s = this._hass.states[e]; if (!s) return;
-    if (moving(s)) return this._call("stop_cover", e);
-    const p = pos(s);
-    this._call(p !== null && p > 0 ? "close_cover" : "open_cover", e);
+  _toggle(id) {
+    const s = this._hass.states[id]; if (!s) return;
+    if (moving(s)) return this._call("stop_cover", id);
+    const e = this._ents().find((x) => x.entity === id) || { entity: id }, p = this._info(e).p;
+    this._call(p !== null && p > 0 ? "close_cover" : "open_cover", id);
   }
+  _more(id) { this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: id }, bubbles: true, composed: true })); }
   _stateText(s) {
     if (!s) return "introuvable";
     if (s.state === "unavailable") return "indisponible";
@@ -73,14 +95,16 @@ class HolmCoversCard extends HTMLElement {
     return p != null ? `Ouvert à ${p} %` : s.state === "open" ? "Ouvert" : "Fermé";
   }
   _row(e) {
-    const s = this._hass.states[e.entity], p = pos(s), mv = moving(s), na = !s || s.state === "unavailable";
-    const col = mv ? MOVE : p > 0 ? OPEN : "var(--secondary-text-color)";
+    const inf = this._info(e), s = inf.s, p = inf.p, mv = inf.mv, na = inf.na;
+    const accent = e.color || e._g?.color;
+    const col = mv ? MOVE : accent ? accent : p > 0 ? OPEN : "var(--secondary-text-color)";
     const name = e.name || s?.attributes.friendly_name || e.entity;
     const open = this._open === e.entity;
-    return `<div class="rw ${open ? "ex" : ""} ${na ? "na" : ""} ${mv ? "mv" : ""}" data-e="${e.entity}" style="--c:${col};--p:${p ?? 0}%">
+    const bar = inf.known && !inf.sensor && p !== null;
+    return `<div class="rw ${open ? "ex" : ""} ${na ? "na" : ""} ${mv ? "mv" : ""} ${accent && !mv && !(p > 0) ? "dim" : ""}" data-e="${e.entity}" style="--c:${col};--p:${p ?? 0}%">
       <div class="top" data-act="row">
         <div class="ic" style="color:${col}">${shutter(p, col)}</div>
-        <div class="tx"><div class="nm">${name}</div><div class="st">${this._stateText(s)}</div><div class="mb"><i></i></div></div>
+        <div class="tx"><div class="nm">${name}</div>${inf.text ? `<div class="st">${inf.text}</div>` : ""}${bar ? `<div class="mb"><i></i></div>` : ""}</div>
         <div class="qb"><button class="q" data-act="close" title="Fermer"><ha-icon icon="mdi:arrow-down"></ha-icon></button><button class="q" data-act="stop" title="Stop"><ha-icon icon="mdi:stop"></ha-icon></button><button class="q" data-act="open" title="Ouvrir"><ha-icon icon="mdi:arrow-up"></ha-icon></button></div>
       </div>
       ${open ? `<div class="pn">
@@ -95,23 +119,24 @@ class HolmCoversCard extends HTMLElement {
   _renderNow() {
     if (!this.shadowRoot || !this._c || !this._hass) return;
     const c = this._c, all = this._ents();
-    const st = all.map((e) => this._hass.states[e.entity]).filter(Boolean);
-    const nOpen = st.filter((s) => (pos(s) ?? 0) > 0).length, nMove = st.filter(moving).length;
+    const infos = all.map((e) => this._info(e)).filter((i) => i.s);
+    const known = infos.filter((i) => i.known), nOpen = known.filter((i) => (i.p ?? 0) > 0).length, nMove = infos.filter((i) => i.mv).length;
     const groups = c.groups.map((g, gi) => {
-      const ents = (g.entities || []).map((e) => (typeof e === "string" ? { entity: e } : e));
-      const o = ents.filter((e) => (pos(this._hass.states[e.entity]) ?? 0) > 0).length;
-      return `<div class="gr"><div class="gh"><ha-icon icon="${g.icon || "mdi:home"}"></ha-icon><span>${g.name || ""}</span><em>${o}/${ents.length} ouverts</em>
+      const ents = (g.entities || []).map((e) => ({ ...norm(e), _g: g }));
+      const ki = ents.map((e) => this._info(e)).filter((i) => i.known), o = ki.filter((i) => (i.p ?? 0) > 0).length;
+      const tint = g.color && g.tint ? ` style="--gc:${g.color};--go:${Math.max(0, Math.min(100, Number(g.tint_opacity ?? 12)))}%"` : g.color ? ` style="--gc:${g.color}"` : "";
+      return `<div class="gr ${g.color && g.tint ? "tint" : ""} ${g.color ? "gcol" : ""}"${tint}><div class="gh"><ha-icon icon="${g.icon || "mdi:home"}"></ha-icon><span>${g.name || ""}</span><em>${ki.length ? `${o}/${ki.length} ouverts` : ""}</em>
           <button class="gb" data-g="${gi}" data-act="gclose" title="Tout fermer"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
           <button class="gb" data-g="${gi}" data-act="gopen" title="Tout ouvrir"><ha-icon icon="mdi:arrow-up"></ha-icon></button></div>
         <div class="list">${ents.map((e) => this._row(e)).join("")}</div></div>`;
     }).join("");
     const body = this._solo && !c.entity ? `<div class="hint">Choisissez un volet dans l'éditeur</div>` : this._solo ? `<div class="list">${this._row(all[0])}</div>` : `
       <div class="hd"><div class="tt">${c.title || ""}</div>
-        <div class="sm"><b>${nOpen}</b>/${st.length} ouverts${nMove ? ` · <b style="color:${MOVE}">${nMove} en mouvement</b>` : ""}</div>
+        <div class="sm">${known.length ? `<b>${nOpen}</b>/${known.length} ouverts` : ""}${nMove ? `${known.length ? " · " : ""}<b style="color:${MOVE}">${nMove} en mouvement</b>` : ""}</div>
         ${c.all ? `<div class="all"><button class="ab" data-act="aclose"><ha-icon icon="mdi:arrow-down"></ha-icon>Tous</button><button class="ab" data-act="aopen"><ha-icon icon="mdi:arrow-up"></ha-icon>Tous</button></div>` : ""}
       </div>
       ${groups}
-      <div class="hint">Appui long sur un volet : position précise</div>`;
+      <div class="hint">${c.tap_action === "position" ? "Toucher un volet : position précise" : "Appui long sur un volet : position précise"}</div>`;
     this.shadowRoot.innerHTML = `
     <style>
       :host { display:block; }
@@ -127,6 +152,9 @@ class HolmCoversCard extends HTMLElement {
       .ab ha-icon, .gb ha-icon, .bt ha-icon { --mdc-icon-size:16px; }
       .ab:hover, .gb:hover, .bt:hover { background:color-mix(in srgb, var(--primary-color, #0abfbf) 22%, transparent); }
       .gr { margin-bottom:8px; }
+      .gr.tint { background:color-mix(in srgb, var(--gc) var(--go), transparent); border-radius:14px; padding:2px 6px 6px; }
+      .gr.gcol .gh, .gr.gcol .gh > ha-icon { color:var(--gc); }
+      .rw.dim .ic { background:color-mix(in srgb, var(--c) 9%, transparent); }
       .gh { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--secondary-text-color); text-transform:uppercase; letter-spacing:.6px; margin:6px 2px 6px; }
       .gh > ha-icon { --mdc-icon-size:15px; }
       .gh em { font-style:normal; font-weight:500; text-transform:none; letter-spacing:0; margin-left:auto; }
@@ -145,7 +173,7 @@ class HolmCoversCard extends HTMLElement {
       @keyframes mv { from { opacity:1; } to { opacity:.45; } }
       .nm { font-size:13.5px; font-weight:600; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .st { font-size:11.5px; color:var(--secondary-text-color); white-space:nowrap; }
-      .mb { height:3px; margin-top:4px; max-width:120px; border-radius:3px; background:color-mix(in srgb, var(--primary-text-color) 10%, transparent); overflow:hidden; }
+      .mb { height:3px; margin-top:4px; border-radius:3px; background:color-mix(in srgb, var(--primary-text-color) 10%, transparent); overflow:hidden; }
       .mb i { display:block; height:100%; width:var(--p); background:var(--c); border-radius:3px; transition:width .6s ease; }
       .rw { container-type:inline-size; }
       .pn { display:flex; align-items:center; gap:6px 10px; padding:16px 18px 10px; flex-wrap:wrap; }
@@ -191,9 +219,22 @@ class HolmCoversCard extends HTMLElement {
       rw.querySelectorAll(".q, .pr").forEach((b) => b.addEventListener("pointerdown", (ev) => ev.stopPropagation()));
       rw.querySelectorAll(".q").forEach((b) => b.addEventListener("pointerup", (ev) => ev.stopPropagation()));
       rw.querySelectorAll(".pr").forEach((b) => b.addEventListener("click", () => this._call("set_cover_position", id, { position: +b.dataset.v })));
-      top.addEventListener("pointerdown", () => { long = false; timer = setTimeout(() => { long = true; this._open = this._open === id ? null : id; this._render(); if (navigator.vibrate) navigator.vibrate(15); }, 450); });
-      const cancel = () => clearTimeout(timer);
-      top.addEventListener("pointerup", () => { cancel(); if (!long) { if (this._open === id) { this._open = null; this._render(); } else this._toggle(id); } });
+      // un toucher qui glisse (défilement de la page) n'est ni un appui court ni un appui long
+      let x0 = 0, y0 = 0, armed = false;
+      const cancel = () => { clearTimeout(timer); armed = false; };
+      top.addEventListener("pointerdown", (ev) => {
+        long = false; armed = true; x0 = ev.clientX; y0 = ev.clientY;
+        timer = setTimeout(() => { if (!armed) return; long = true; armed = false; this._open = this._open === id ? null : id; this._render(); if (navigator.vibrate) navigator.vibrate(15); }, 450);
+      });
+      top.addEventListener("pointermove", (ev) => { if (armed && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) cancel(); });
+      top.addEventListener("pointerup", () => {
+        const tap = armed && !long; cancel(); if (!tap) return;
+        if (this._open === id) { this._open = null; return this._render(); }
+        const a = this._c.tap_action;
+        if (a === "toggle") this._toggle(id);
+        else if (a === "more-info") this._more(id);
+        else if (a === "position") { this._open = id; this._render(); }
+      });
       top.addEventListener("pointerleave", cancel); top.addEventListener("pointercancel", cancel);
       top.addEventListener("contextmenu", (ev) => ev.preventDefault());
       rw.querySelector('[data-act="open"]')?.addEventListener("click", () => this._call("open_cover", id));
@@ -216,7 +257,12 @@ class HolmCoversCard extends HTMLElement {
   getGridOptions() { return this._solo ? { columns: 6, rows: "auto", min_columns: 4 } : { columns: 12, rows: "auto", min_columns: 4 }; }
 }
 
-const L = { mode: "Affichage", entity: "Volet", vname: "Nom affiché (optionnel)", title: "Titre", all: "Commande « Tous » (volet ou groupe, optionnel)", show_frame: "Afficher le cadre de la carte", name: "Nom du groupe", icon: "Icône", entities: "Volets" };
+const L = { mode: "Affichage", entity: "Volet", vname: "Nom affiché (optionnel)", title: "Titre", all: "Commande « Tous » (volet ou groupe, optionnel)", show_frame: "Afficher le cadre de la carte", name: "Nom du groupe", icon: "Icône", entities: "Volets",
+  show_state: "Afficher l'état (Ouvert / Fermé, position)", tap_action: "Appui court sur un volet", state_entity: "Capteur d'ouverture (état d'après ce capteur)",
+  color: "Couleur", gcolor: "Couleur du groupe", tint: "Fond teinté", tint_opacity: "Opacité du fond", vstate: "Afficher l'état", vcolor: "Couleur (sinon celle du groupe)" };
+const TAP = { select: { mode: "dropdown", options: [{ value: "toggle", label: "Ouvrir / fermer (ou stopper)" }, { value: "position", label: "Afficher le curseur de position" },
+  { value: "more-info", label: "Ouvrir la fiche du volet" }, { value: "none", label: "Aucune action" }] } };
+const STATE_SEL = { entity: { domain: ["binary_sensor", "input_boolean", "switch"] } };
 class HolmCoversCardEditor extends HTMLElement {
   setConfig(c) { const j = JSON.stringify(c); this._config = JSON.parse(j); if (j === this._last && this._built) return; this._build(); }
   set hass(h) { this._hass = h; if (!this._built) this._build(); else this.querySelectorAll("ha-form").forEach((f) => (f.hass = h)); }
@@ -242,28 +288,66 @@ class HolmCoversCardEditor extends HTMLElement {
       this.innerHTML = `<div class="mode"></div><div class="gen"></div>`;
       this.querySelector(".mode").appendChild(modeForm);
       this.querySelector(".gen").appendChild(this._form([{ name: "entity", selector: { entity: { domain: ["cover"] } } }, { type: "grid", name: "", schema: [
-        { name: "vname", selector: { text: {} } }, { name: "show_frame", selector: { boolean: {} } }] }], { entity: c.entity, vname: c.name || "", show_frame: c.show_frame !== false }, (v) => {
+        { name: "vname", selector: { text: {} } }, { name: "show_frame", selector: { boolean: {} } }] },
+        { name: "tap_action", selector: TAP }, { name: "show_state", selector: { boolean: {} } }, { name: "state_entity", selector: STATE_SEL }, { name: "color", selector: { color_rgb: {} } }],
+        { entity: c.entity, vname: c.name || "", show_frame: c.show_frame !== false, tap_action: c.tap_action || "toggle", show_state: c.show_state !== false, state_entity: c.state_entity || "", color: hex2rgb(c.color) }, (v) => {
         this._config.entity = v.entity || ""; if (v.vname) this._config.name = v.vname; else delete this._config.name;
-        if (v.show_frame === false) this._config.show_frame = false; else delete this._config.show_frame; this._emit(); }));
+        if (v.show_frame === false) this._config.show_frame = false; else delete this._config.show_frame;
+        if (v.tap_action && v.tap_action !== "toggle") this._config.tap_action = v.tap_action; else delete this._config.tap_action;
+        if (v.show_state === false) this._config.show_state = false; else delete this._config.show_state;
+        if (v.state_entity) this._config.state_entity = v.state_entity; else delete this._config.state_entity;
+        if (v.color) this._config.color = rgb2hex(v.color); else delete this._config.color; this._emit(); }));
       return;
     }
     c.groups = c.groups || [];
     this.innerHTML = `<style>.it{border:1px solid var(--divider-color);border-radius:12px;padding:8px 12px 4px;margin:10px 0}.ih{display:flex;justify-content:space-between;font-weight:600;margin-bottom:4px}
       .ih span{display:flex;gap:4px} button{cursor:pointer;background:none;border:1px solid var(--divider-color);color:var(--primary-text-color);border-radius:8px;padding:4px 8px}.add{width:100%;padding:8px}
-      .hint{font-size:12px;color:var(--secondary-text-color)}</style><div class="gen"></div><div class="items"></div><button class="add">+ Ajouter un groupe</button>`;
+      .hint{font-size:12px;color:var(--secondary-text-color)} .per{margin:6px 0 8px} .per summary{cursor:pointer;font-weight:600;padding:4px 0}
+      .pv{border-top:1px solid var(--divider-color);padding:6px 0} .pvh{font-size:13px;font-weight:600;margin-bottom:2px}</style><div class="gen"></div><div class="items"></div><button class="add">+ Ajouter un groupe</button>`;
     this.prepend(modeForm);
     this.querySelector(".gen").appendChild(this._form([{ name: "title", selector: { text: {} } }, { type: "grid", name: "", schema: [
-      { name: "all", selector: { entity: { domain: ["cover"] } } }, { name: "show_frame", selector: { boolean: {} } }] }], { show_frame: true, ...c }, (v) => {
-      Object.assign(this._config, v); if (!v.all) delete this._config.all; if (v.show_frame !== false) delete this._config.show_frame; this._emit(); }));
+      { name: "all", selector: { entity: { domain: ["cover"] } } }, { name: "show_frame", selector: { boolean: {} } }] },
+      { type: "grid", name: "", schema: [{ name: "tap_action", selector: TAP }, { name: "show_state", selector: { boolean: {} } }] }],
+      { show_frame: true, show_state: true, tap_action: "toggle", ...c }, (v) => {
+      const { title, all, show_frame, tap_action, show_state } = v;
+      Object.assign(this._config, { title, all, show_frame, tap_action, show_state });
+      if (!all) delete this._config.all; if (show_frame !== false) delete this._config.show_frame;
+      if (!tap_action || tap_action === "toggle") delete this._config.tap_action; if (show_state !== false) delete this._config.show_state; this._emit(); }));
     const box = this.querySelector(".items");
     c.groups.forEach((g, i) => {
       const w = document.createElement("div"); w.className = "it";
-      w.innerHTML = `<div class="ih">${g.name || "Groupe " + (i + 1)}<span><button data-a="up">▲</button><button data-a="down">▼</button><button data-a="del">✕</button></span></div><div class="hint">Les noms courts de chaque volet se règlent en YAML (name), sinon le nom du volet est utilisé.</div>`;
+      w.innerHTML = `<div class="ih">${g.name || "Groupe " + (i + 1)}<span><button data-a="up">▲</button><button data-a="down">▼</button><button data-a="del">✕</button></span></div>`;
       w.appendChild(this._form([{ type: "grid", name: "", schema: [{ name: "name", selector: { text: {} } }, { name: "icon", selector: { icon: {} } }] },
-        { name: "entities", selector: { entity: { multiple: true, domain: ["cover"] } } }], { ...g, entities: (g.entities || []).map((e) => (typeof e === "string" ? e : e.entity)) }, (v) => {
-        const prev = Object.fromEntries((g.entities || []).map((e) => (typeof e === "string" ? [e, { entity: e }] : [e.entity, e])));
-        const o = { ...g, name: v.name, icon: v.icon, entities: (v.entities || []).map((id) => prev[id] || { entity: id }) }; if (!o.icon) delete o.icon;
-        this._config.groups[i] = o; this._emit(); }));
+        { type: "grid", name: "", schema: [{ name: "gcolor", selector: { color_rgb: {} } }, { name: "tint", selector: { boolean: {} } },
+          { name: "tint_opacity", selector: { number: { min: 3, max: 60, step: 1, mode: "slider", unit_of_measurement: "%" } } }] },
+        { name: "entities", selector: { entity: { multiple: true, domain: ["cover"] } } }],
+        { ...g, gcolor: hex2rgb(g.color), tint: !!g.tint, tint_opacity: g.tint_opacity ?? 12, entities: (g.entities || []).map((e) => (typeof e === "string" ? e : e.entity)) }, (v) => {
+        const cur = this._config.groups[i];
+        const prev = Object.fromEntries((cur.entities || []).map((e) => (typeof e === "string" ? [e, { entity: e }] : [e.entity, e])));
+        const o = { ...cur, name: v.name, icon: v.icon, entities: (v.entities || []).map((id) => prev[id] || { entity: id }) };
+        if (!o.icon) delete o.icon;
+        if (v.gcolor) o.color = rgb2hex(v.gcolor); else delete o.color;
+        if (v.tint) o.tint = true; else delete o.tint;
+        if (v.tint && Number(v.tint_opacity) !== 12) o.tint_opacity = Number(v.tint_opacity); else delete o.tint_opacity;
+        const changedList = JSON.stringify((cur.entities || []).map((e) => norm(e).entity)) !== JSON.stringify(v.entities || []);
+        this._config.groups[i] = o; this._emit(); if (changedList) this._build(); }));
+      // réglages volet par volet (nom court, capteur d'ouverture, couleur, état)
+      const per = document.createElement("details"); per.className = "per";
+      per.innerHTML = `<summary>Réglages par volet</summary>`;
+      (g.entities || []).forEach((raw, j) => {
+        const e = norm(raw), st = this._hass.states[e.entity];
+        const row = document.createElement("div"); row.className = "pv";
+        row.innerHTML = `<div class="pvh">${st?.attributes.friendly_name || e.entity}</div>`;
+        row.appendChild(this._form([{ type: "grid", name: "", schema: [{ name: "vname", selector: { text: {} } }, { name: "vcolor", selector: { color_rgb: {} } }] },
+          { name: "state_entity", selector: STATE_SEL }, { name: "vstate", selector: { boolean: {} } }],
+          { vname: e.name || "", vcolor: hex2rgb(e.color), state_entity: e.state_entity || "", vstate: e.show_state ?? (this._config.show_state !== false) }, (v) => {
+          const o = { entity: e.entity };
+          if (v.vname) o.name = v.vname; if (v.vcolor) o.color = rgb2hex(v.vcolor); if (v.state_entity) o.state_entity = v.state_entity;
+          if (v.vstate !== (this._config.show_state !== false)) o.show_state = !!v.vstate;
+          this._config.groups[i].entities[j] = Object.keys(o).length === 1 ? e.entity : o; this._emit(); }));
+        per.appendChild(row);
+      });
+      if ((g.entities || []).length) w.appendChild(per);
       w.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { const a = b.dataset.a, arr = this._config.groups;
         if (a === "del") arr.splice(i, 1); if (a === "up" && i > 0) [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; if (a === "down" && i < arr.length - 1) [arr[i + 1], arr[i]] = [arr[i], arr[i + 1]];
         this._emit(); this._build(); }));
@@ -275,5 +359,5 @@ class HolmCoversCardEditor extends HTMLElement {
 if (!customElements.get("holm-covers-card-editor")) customElements.define("holm-covers-card-editor", HolmCoversCardEditor);
 if (!customElements.get("holm-covers-card")) customElements.define("holm-covers-card", HolmCoversCard);
 window.customCards = window.customCards || [];
-window.customCards.push({ type: "holm-covers-card", name: "HOLM – Volets", description: "Volets compacts par étage ou volet seul : appui court ouvre/ferme, appui long affiche le curseur de position", preview: false });
+window.customCards.push({ type: "holm-covers-card", name: "HOLM – Volets", description: "Volets compacts par étage ou volet seul : appui court ouvre/ferme, appui long affiche le curseur de position, couleurs par groupe, capteurs d'ouverture", preview: false });
 })();
