@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.4.0 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.3.0 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -13,7 +13,7 @@
 //   show_version (false = masque le numéro de version en bas de la carte)
 //   min_position (0-100, défaut 0) : position la plus fermée autorisée (ex. 40 = « fermer » s'arrête à 40 %). Valable sur la carte, un groupe ou un volet.
 (() => {
-const VERSION = "1.4.0";   // version affichée en bas de la carte (show_version: false pour la masquer)
+const VERSION = "1.3.0";   // version affichée en bas de la carte (show_version: false pour la masquer)
 // Garde la position de défilement pendant un nouveau rendu complet de la carte (iPhone / iPad : WebKit n'a pas de
 // « scroll anchoring » et la page remontait d'un coup). On fige la hauteur de la carte et on remet le défilement en place.
 const keepScroll = (host, fn) => {
