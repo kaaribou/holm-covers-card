@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.3.0 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.3.1 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -13,7 +13,7 @@
 //   show_version (false = masque le numéro de version en bas de la carte)
 //   min_position (0-100, défaut 0) : position la plus fermée autorisée (ex. 40 = « fermer » s'arrête à 40 %). Valable sur la carte, un groupe ou un volet.
 (() => {
-const VERSION = "1.3.0";   // version affichée en bas de la carte (show_version: false pour la masquer)
+const VERSION = "1.3.1";   // version affichée en bas de la carte (show_version: false pour la masquer)
 // Garde la position de défilement pendant un nouveau rendu complet de la carte (iPhone / iPad : WebKit n'a pas de
 // « scroll anchoring » et la page remontait d'un coup). On fige la hauteur de la carte et on remet le défilement en place.
 const keepScroll = (host, fn) => {
@@ -70,10 +70,11 @@ class HolmCoversCard extends HTMLElement {
     if (e.state_entity) {
       const b = this._hass.states[e.state_entity], on = b && ["on", "open", "true"].includes(b.state);
       const known = !!b && !["unavailable", "unknown"].includes(b.state);
-      return { s, na, mv: false, sensor: true, known, p: known ? (on ? 100 : 0) : null, text: !known ? "État inconnu" : on ? "Ouvert" : "Fermé" };
+      return { s, na, mv: false, sensor: true, known, p: known ? (on ? 100 : 0) : null, ep: known ? (on ? 100 : 0) : null, text: !known ? "État inconnu" : on ? "Ouvert" : "Fermé" };
     }
-    if (!show) return { s, na, mv: moving(s), sensor: false, known: false, p: null, text: "" };
-    return { s, na, mv: moving(s), sensor: false, known: true, p: pos(s), text: this._stateText(s, minPos(this._c, e)) };
+    if (!show) return { s, na, mv: moving(s), sensor: false, known: false, p: null, ep: null, text: "" };
+    const m = minPos(this._c, e), p = pos(s), ep = p !== null && p <= m ? 0 : p;
+    return { s, na, mv: moving(s), sensor: false, known: true, p, ep, text: this._stateText(s, m) };
   }
   set hass(h) {
     this._hass = h;
@@ -107,15 +108,15 @@ class HolmCoversCard extends HTMLElement {
     return p != null ? `Ouvert à ${p} %` : s.state === "open" ? "Ouvert" : "Fermé";
   }
   _row(e) {
-    const inf = this._info(e), s = inf.s, p = inf.p, mv = inf.mv, na = inf.na;
+    const inf = this._info(e), s = inf.s, p = inf.p, ep = inf.ep, mv = inf.mv, na = inf.na;
     const accent = e.color || e._g?.color;
-    const col = mv ? MOVE : accent ? accent : p > 0 ? OPEN : "var(--secondary-text-color)";
+    const col = mv ? MOVE : accent ? accent : ep > 0 ? OPEN : "var(--secondary-text-color)";
     const name = e.name || s?.attributes.friendly_name || e.entity;
     const open = this._open === e.entity;
     const bar = inf.known && !inf.sensor && p !== null;
-    return `<div class="rw ${open ? "ex" : ""} ${na ? "na" : ""} ${mv ? "mv" : ""} ${accent && !mv && !(p > 0) ? "dim" : ""}" data-e="${e.entity}" style="--c:${col};--p:${p ?? 0}%">
+    return `<div class="rw ${open ? "ex" : ""} ${na ? "na" : ""} ${mv ? "mv" : ""} ${accent && !mv && !(ep > 0) ? "dim" : ""}" data-e="${e.entity}" style="--c:${col};--p:${ep ?? 0}%">
       <div class="top" data-act="row">
-        <div class="ic" style="color:${col}">${shutter(p, col)}</div>
+        <div class="ic" style="color:${col}">${shutter(ep, col)}</div>
         <div class="tx"><div class="nm">${name}</div>${inf.text ? `<div class="st">${inf.text}</div>` : ""}${bar ? `<div class="mb"><i></i></div>` : ""}</div>
         <div class="qb"><button class="q" data-act="close" title="Fermer"><ha-icon icon="mdi:arrow-down"></ha-icon></button><button class="q" data-act="stop" title="Stop"><ha-icon icon="mdi:stop"></ha-icon></button><button class="q" data-act="open" title="Ouvrir"><ha-icon icon="mdi:arrow-up"></ha-icon></button></div>
       </div>
@@ -132,10 +133,10 @@ class HolmCoversCard extends HTMLElement {
     if (!this.shadowRoot || !this._c || !this._hass) return;
     const c = this._c, all = this._ents();
     const infos = all.map((e) => this._info(e)).filter((i) => i.s);
-    const known = infos.filter((i) => i.known), nOpen = known.filter((i) => (i.p ?? 0) > 0).length, nMove = infos.filter((i) => i.mv).length;
+    const known = infos.filter((i) => i.known), nOpen = known.filter((i) => (i.ep ?? 0) > 0).length, nMove = infos.filter((i) => i.mv).length;
     const groups = c.groups.map((g, gi) => {
       const ents = (g.entities || []).map((e) => ({ ...norm(e), _g: g }));
-      const ki = ents.map((e) => this._info(e)).filter((i) => i.known), o = ki.filter((i) => (i.p ?? 0) > 0).length;
+      const ki = ents.map((e) => this._info(e)).filter((i) => i.known), o = ki.filter((i) => (i.ep ?? 0) > 0).length;
       const tint = g.color && g.tint ? ` style="--gc:${g.color};--go:${Math.max(0, Math.min(100, Number(g.tint_opacity ?? 12)))}%"` : g.color ? ` style="--gc:${g.color}"` : "";
       return `<div class="gr ${g.color && g.tint ? "tint" : ""} ${g.color ? "gcol" : ""}"${tint}><div class="gh"><ha-icon icon="${g.icon || "mdi:home"}"></ha-icon><span>${g.name || ""}</span><em>${ki.length ? `${o}/${ki.length} ouverts` : ""}</em>
           <button class="gb" data-g="${gi}" data-act="gclose" title="Tout fermer"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
