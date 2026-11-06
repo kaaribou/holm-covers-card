@@ -1,4 +1,4 @@
-/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.2.0 */
+/* holm-covers-card — https://github.com/kaaribou/holm-covers-card — licence MIT — v1.4.0 */
 // holm-covers-card — volets compacts, horizontaux, regroupés par étage
 // Boutons ▼ ■ ▲ sur chaque ligne. Appui court sur la ligne : ouvre / ferme (ou stoppe). Appui long : curseur de position.
 // type: custom:holm-covers-card
@@ -10,7 +10,10 @@
 // ou, pour un volet seul :  entity: cover.bureau   name: Volets du bureau
 // Options : show_state (false = ni « Ouvert / Fermé » ni position), tap_action (toggle | none | more-info | position),
 //   par groupe : color, tint, tint_opacity ; par volet : state_entity (capteur d'ouverture), color, show_state
+//   show_version (false = masque le numéro de version en bas de la carte)
+//   min_position (0-100, défaut 0) : position la plus fermée autorisée (ex. 40 = « fermer » s'arrête à 40 %). Valable sur la carte, un groupe ou un volet.
 (() => {
+const VERSION = "1.4.0";   // version affichée en bas de la carte (show_version: false pour la masquer)
 // Garde la position de défilement pendant un nouveau rendu complet de la carte (iPhone / iPad : WebKit n'a pas de
 // « scroll anchoring » et la page remontait d'un coup). On fige la hauteur de la carte et on remet le défilement en place.
 const keepScroll = (host, fn) => {
@@ -38,6 +41,7 @@ const norm = (e) => (typeof e === "string" ? { entity: e } : e);
 const pos = (s) => { if (!s) return null; const p = s.attributes.current_position; if (p !== undefined && p !== null) return Number(p); return s.state === "open" ? 100 : s.state === "closed" ? 0 : null; };
 const moving = (s) => s && (s.state === "opening" || s.state === "closing");
 const canPos = (s) => s && ((s.attributes.supported_features || 0) & 4) === 4;
+const minPos = (c, e) => Number(e?.min_position ?? e?._g?.min_position ?? c?.min_position ?? 0) || 0;
 // petite fenêtre dont les lames descendent selon la fermeture
 const shutter = (p, col) => {
   const closed = p == null ? 50 : 100 - p, h = Math.round((closed / 100) * 16);
@@ -69,7 +73,7 @@ class HolmCoversCard extends HTMLElement {
       return { s, na, mv: false, sensor: true, known, p: known ? (on ? 100 : 0) : null, text: !known ? "État inconnu" : on ? "Ouvert" : "Fermé" };
     }
     if (!show) return { s, na, mv: moving(s), sensor: false, known: false, p: null, text: "" };
-    return { s, na, mv: moving(s), sensor: false, known: true, p: pos(s), text: this._stateText(s) };
+    return { s, na, mv: moving(s), sensor: false, known: true, p: pos(s), text: this._stateText(s, minPos(this._c, e)) };
   }
   set hass(h) {
     this._hass = h;
@@ -78,20 +82,28 @@ class HolmCoversCard extends HTMLElement {
     if (sig !== this._sig && !this._drag) { this._sig = sig; this._render(); }
   }
   _call(svc, entity, data = {}) { this._hass.callService("cover", svc, { entity_id: entity, ...data }); }
+  _close(id) {
+    const e = this._ents().find((x) => x.entity === id) || { entity: id }, m = minPos(this._c, e);
+    if (m > 0) this._call("set_cover_position", id, { position: m }); else this._call("close_cover", id);
+  }
+  _clamp(id, v) {
+    const e = this._ents().find((x) => x.entity === id) || { entity: id };
+    return Math.max(minPos(this._c, e), v);
+  }
   _toggle(id) {
     const s = this._hass.states[id]; if (!s) return;
     if (moving(s)) return this._call("stop_cover", id);
-    const e = this._ents().find((x) => x.entity === id) || { entity: id }, p = this._info(e).p;
-    this._call(p !== null && p > 0 ? "close_cover" : "open_cover", id);
+    const e = this._ents().find((x) => x.entity === id) || { entity: id }, p = this._info(e).p, m = minPos(this._c, e);
+    if (p !== null && p > m) this._close(id); else this._call("open_cover", id);
   }
   _more(id) { this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: id }, bubbles: true, composed: true })); }
-  _stateText(s) {
+  _stateText(s, m = 0) {
     if (!s) return "introuvable";
     if (s.state === "unavailable") return "indisponible";
     const p = pos(s);
     if (s.state === "opening") return `Ouverture… ${p ?? ""}${p != null ? " %" : ""}`;
     if (s.state === "closing") return `Fermeture… ${p ?? ""}${p != null ? " %" : ""}`;
-    if (p === 100) return "Ouvert"; if (p === 0) return "Fermé";
+    if (p === 100) return "Ouvert"; if (p != null && p <= m) return "Fermé";
     return p != null ? `Ouvert à ${p} %` : s.state === "open" ? "Ouvert" : "Fermé";
   }
   _row(e) {
@@ -199,26 +211,27 @@ class HolmCoversCard extends HTMLElement {
               display:flex; align-items:center; justify-content:center; }
       .sl b span { position:absolute; top:-18px; font-size:11px; font-weight:700; color:var(--primary-text-color); white-space:nowrap; }
       .sp { height:32px; }
+      .ver { font-size:9px; text-align:right; color:var(--secondary-text-color); opacity:.5; margin-top:4px; }
       .hint { font-size:10.5px; color:var(--secondary-text-color); text-align:center; margin-top:6px; opacity:.7; }
     </style>
-    <ha-card class="${c.show_frame === false ? "noframe" : ""} ${this._solo ? "solo" : ""}">${body}
+    <ha-card class="${c.show_frame === false ? "noframe" : ""} ${this._solo ? "solo" : ""}">${body}${c.show_version === false ? "" : `<div class="ver">v${VERSION}</div>`}
     </ha-card>`;
     this._bind();
   }
   _bind() {
     const sr = this.shadowRoot;
     sr.querySelector('[data-act="aopen"]')?.addEventListener("click", () => this._call("open_cover", this._c.all));
-    sr.querySelector('[data-act="aclose"]')?.addEventListener("click", () => this._call("close_cover", this._c.all));
+    sr.querySelector('[data-act="aclose"]')?.addEventListener("click", () => { const m = Number(this._c.min_position) || 0; if (m > 0) this._call("set_cover_position", this._c.all, { position: m }); else this._call("close_cover", this._c.all); });
     sr.querySelectorAll(".gb").forEach((b) => b.addEventListener("click", () => {
       const g = this._c.groups[+b.dataset.g], ids = (g.entities || []).map((e) => (typeof e === "string" ? e : e.entity));
-      this._call(b.dataset.act === "gopen" ? "open_cover" : "close_cover", ids);
+      if (b.dataset.act === "gopen") this._call("open_cover", ids); else ids.forEach((id) => this._close(id));
     }));
     sr.querySelectorAll(".rw").forEach((rw) => {
       const id = rw.dataset.e, top = rw.querySelector(".top");
       let timer = null, long = false;
       rw.querySelectorAll(".q, .pr").forEach((b) => b.addEventListener("pointerdown", (ev) => ev.stopPropagation()));
       rw.querySelectorAll(".q").forEach((b) => b.addEventListener("pointerup", (ev) => ev.stopPropagation()));
-      rw.querySelectorAll(".pr").forEach((b) => b.addEventListener("click", () => this._call("set_cover_position", id, { position: +b.dataset.v })));
+      rw.querySelectorAll(".pr").forEach((b) => b.addEventListener("click", () => this._call("set_cover_position", id, { position: this._clamp(id, +b.dataset.v) })));
       // un toucher qui glisse (défilement de la page) n'est ni un appui court ni un appui long
       let x0 = 0, y0 = 0, armed = false;
       const cancel = () => { clearTimeout(timer); armed = false; };
@@ -238,16 +251,16 @@ class HolmCoversCard extends HTMLElement {
       top.addEventListener("pointerleave", cancel); top.addEventListener("pointercancel", cancel);
       top.addEventListener("contextmenu", (ev) => ev.preventDefault());
       rw.querySelector('[data-act="open"]')?.addEventListener("click", () => this._call("open_cover", id));
-      rw.querySelector('[data-act="close"]')?.addEventListener("click", () => this._call("close_cover", id));
+      rw.querySelector('[data-act="close"]')?.addEventListener("click", () => this._close(id));
       rw.querySelector('[data-act="stop"]')?.addEventListener("click", () => this._call("stop_cover", id));
       const sl = rw.querySelector(".sl");
       if (sl) {
         const knob = sl.querySelector("b"), fill = sl.querySelector(".tr i"), lab = knob.querySelector("span");
         const val = (ev) => { const r = sl.getBoundingClientRect(); return Math.round(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * 100); };
         const show = (v) => { knob.style.left = v + "%"; fill.style.width = v + "%"; lab.textContent = v; };
-        sl.addEventListener("pointerdown", (ev) => { this._drag = true; sl.setPointerCapture(ev.pointerId); show(val(ev)); });
-        sl.addEventListener("pointermove", (ev) => { if (this._drag) show(val(ev)); });
-        sl.addEventListener("pointerup", (ev) => { if (!this._drag) return; this._drag = false; const v = val(ev); show(v); this._call("set_cover_position", id, { position: v }); });
+        sl.addEventListener("pointerdown", (ev) => { this._drag = true; sl.setPointerCapture(ev.pointerId); show(this._clamp(id, val(ev))); });
+        sl.addEventListener("pointermove", (ev) => { if (this._drag) show(this._clamp(id, val(ev))); });
+        sl.addEventListener("pointerup", (ev) => { if (!this._drag) return; this._drag = false; const v = this._clamp(id, val(ev)); show(v); this._call("set_cover_position", id, { position: v }); });
       }
     });
   }
@@ -259,10 +272,12 @@ class HolmCoversCard extends HTMLElement {
 
 const L = { mode: "Affichage", entity: "Volet", vname: "Nom affiché (optionnel)", title: "Titre", all: "Commande « Tous » (volet ou groupe, optionnel)", show_frame: "Afficher le cadre de la carte", name: "Nom du groupe", icon: "Icône", entities: "Volets",
   show_state: "Afficher l'état (Ouvert / Fermé, position)", tap_action: "Appui court sur un volet", state_entity: "Capteur d'ouverture (état d'après ce capteur)",
-  color: "Couleur", gcolor: "Couleur du groupe", tint: "Fond teinté", tint_opacity: "Opacité du fond", vstate: "Afficher l'état", vcolor: "Couleur (sinon celle du groupe)" };
+  color: "Couleur", gcolor: "Couleur du groupe", tint: "Fond teinté", tint_opacity: "Opacité du fond", vstate: "Afficher l'état", vcolor: "Couleur (sinon celle du groupe)",
+  min_position: "Position la plus fermée (0 = désactivé)", vmin: "Position la plus fermée (0 = celle du groupe / de la carte)", show_version: "Afficher la version" };
 const TAP = { select: { mode: "dropdown", options: [{ value: "toggle", label: "Ouvrir / fermer (ou stopper)" }, { value: "position", label: "Afficher le curseur de position" },
   { value: "more-info", label: "Ouvrir la fiche du volet" }, { value: "none", label: "Aucune action" }] } };
 const STATE_SEL = { entity: { domain: ["binary_sensor", "input_boolean", "switch"] } };
+const MINSEL = { number: { min: 0, max: 100, step: 1, mode: "slider", unit_of_measurement: "%" } };
 class HolmCoversCardEditor extends HTMLElement {
   setConfig(c) { const j = JSON.stringify(c); this._config = JSON.parse(j); if (j === this._last && this._built) return; this._build(); }
   set hass(h) { this._hass = h; if (!this._built) this._build(); else this.querySelectorAll("ha-form").forEach((f) => (f.hass = h)); }
@@ -289,14 +304,17 @@ class HolmCoversCardEditor extends HTMLElement {
       this.querySelector(".mode").appendChild(modeForm);
       this.querySelector(".gen").appendChild(this._form([{ name: "entity", selector: { entity: { domain: ["cover"] } } }, { type: "grid", name: "", schema: [
         { name: "vname", selector: { text: {} } }, { name: "show_frame", selector: { boolean: {} } }] },
-        { name: "tap_action", selector: TAP }, { name: "show_state", selector: { boolean: {} } }, { name: "state_entity", selector: STATE_SEL }, { name: "color", selector: { color_rgb: {} } }],
-        { entity: c.entity, vname: c.name || "", show_frame: c.show_frame !== false, tap_action: c.tap_action || "toggle", show_state: c.show_state !== false, state_entity: c.state_entity || "", color: hex2rgb(c.color) }, (v) => {
+        { name: "tap_action", selector: TAP }, { name: "show_state", selector: { boolean: {} } }, { name: "state_entity", selector: STATE_SEL }, { name: "color", selector: { color_rgb: {} } },
+        { type: "grid", name: "", schema: [{ name: "min_position", selector: MINSEL }, { name: "show_version", selector: { boolean: {} } }] }],
+        { entity: c.entity, vname: c.name || "", show_frame: c.show_frame !== false, tap_action: c.tap_action || "toggle", show_state: c.show_state !== false, state_entity: c.state_entity || "", color: hex2rgb(c.color), min_position: c.min_position ?? 0, show_version: c.show_version !== false }, (v) => {
         this._config.entity = v.entity || ""; if (v.vname) this._config.name = v.vname; else delete this._config.name;
         if (v.show_frame === false) this._config.show_frame = false; else delete this._config.show_frame;
         if (v.tap_action && v.tap_action !== "toggle") this._config.tap_action = v.tap_action; else delete this._config.tap_action;
         if (v.show_state === false) this._config.show_state = false; else delete this._config.show_state;
         if (v.state_entity) this._config.state_entity = v.state_entity; else delete this._config.state_entity;
-        if (v.color) this._config.color = rgb2hex(v.color); else delete this._config.color; this._emit(); }));
+        if (v.color) this._config.color = rgb2hex(v.color); else delete this._config.color;
+        if (Number(v.min_position) > 0) this._config.min_position = Number(v.min_position); else delete this._config.min_position;
+        if (v.show_version === false) this._config.show_version = false; else delete this._config.show_version; this._emit(); }));
       return;
     }
     c.groups = c.groups || [];
@@ -307,12 +325,15 @@ class HolmCoversCardEditor extends HTMLElement {
     this.prepend(modeForm);
     this.querySelector(".gen").appendChild(this._form([{ name: "title", selector: { text: {} } }, { type: "grid", name: "", schema: [
       { name: "all", selector: { entity: { domain: ["cover"] } } }, { name: "show_frame", selector: { boolean: {} } }] },
-      { type: "grid", name: "", schema: [{ name: "tap_action", selector: TAP }, { name: "show_state", selector: { boolean: {} } }] }],
-      { show_frame: true, show_state: true, tap_action: "toggle", ...c }, (v) => {
+      { type: "grid", name: "", schema: [{ name: "tap_action", selector: TAP }, { name: "show_state", selector: { boolean: {} } }] },
+      { type: "grid", name: "", schema: [{ name: "min_position", selector: MINSEL }, { name: "show_version", selector: { boolean: {} } }] }],
+      { show_frame: true, show_state: true, tap_action: "toggle", min_position: 0, show_version: true, ...c }, (v) => {
       const { title, all, show_frame, tap_action, show_state } = v;
       Object.assign(this._config, { title, all, show_frame, tap_action, show_state });
       if (!all) delete this._config.all; if (show_frame !== false) delete this._config.show_frame;
-      if (!tap_action || tap_action === "toggle") delete this._config.tap_action; if (show_state !== false) delete this._config.show_state; this._emit(); }));
+      if (!tap_action || tap_action === "toggle") delete this._config.tap_action; if (show_state !== false) delete this._config.show_state;
+      if (Number(v.min_position) > 0) this._config.min_position = Number(v.min_position); else delete this._config.min_position;
+      if (v.show_version === false) this._config.show_version = false; else delete this._config.show_version; this._emit(); }));
     const box = this.querySelector(".items");
     c.groups.forEach((g, i) => {
       const w = document.createElement("div"); w.className = "it";
@@ -320,12 +341,14 @@ class HolmCoversCardEditor extends HTMLElement {
       w.appendChild(this._form([{ type: "grid", name: "", schema: [{ name: "name", selector: { text: {} } }, { name: "icon", selector: { icon: {} } }] },
         { type: "grid", name: "", schema: [{ name: "gcolor", selector: { color_rgb: {} } }, { name: "tint", selector: { boolean: {} } },
           { name: "tint_opacity", selector: { number: { min: 3, max: 60, step: 1, mode: "slider", unit_of_measurement: "%" } } }] },
+        { name: "min_position", selector: MINSEL },
         { name: "entities", selector: { entity: { multiple: true, domain: ["cover"] } } }],
-        { ...g, gcolor: hex2rgb(g.color), tint: !!g.tint, tint_opacity: g.tint_opacity ?? 12, entities: (g.entities || []).map((e) => (typeof e === "string" ? e : e.entity)) }, (v) => {
+        { ...g, gcolor: hex2rgb(g.color), tint: !!g.tint, tint_opacity: g.tint_opacity ?? 12, min_position: g.min_position ?? 0, entities: (g.entities || []).map((e) => (typeof e === "string" ? e : e.entity)) }, (v) => {
         const cur = this._config.groups[i];
         const prev = Object.fromEntries((cur.entities || []).map((e) => (typeof e === "string" ? [e, { entity: e }] : [e.entity, e])));
         const o = { ...cur, name: v.name, icon: v.icon, entities: (v.entities || []).map((id) => prev[id] || { entity: id }) };
         if (!o.icon) delete o.icon;
+        if (Number(v.min_position) > 0) o.min_position = Number(v.min_position); else delete o.min_position;
         if (v.gcolor) o.color = rgb2hex(v.gcolor); else delete o.color;
         if (v.tint) o.tint = true; else delete o.tint;
         if (v.tint && Number(v.tint_opacity) !== 12) o.tint_opacity = Number(v.tint_opacity); else delete o.tint_opacity;
@@ -339,10 +362,10 @@ class HolmCoversCardEditor extends HTMLElement {
         const row = document.createElement("div"); row.className = "pv";
         row.innerHTML = `<div class="pvh">${st?.attributes.friendly_name || e.entity}</div>`;
         row.appendChild(this._form([{ type: "grid", name: "", schema: [{ name: "vname", selector: { text: {} } }, { name: "vcolor", selector: { color_rgb: {} } }] },
-          { name: "state_entity", selector: STATE_SEL }, { name: "vstate", selector: { boolean: {} } }],
-          { vname: e.name || "", vcolor: hex2rgb(e.color), state_entity: e.state_entity || "", vstate: e.show_state ?? (this._config.show_state !== false) }, (v) => {
+          { name: "state_entity", selector: STATE_SEL }, { name: "vstate", selector: { boolean: {} } }, { name: "vmin", selector: MINSEL }],
+          { vname: e.name || "", vcolor: hex2rgb(e.color), state_entity: e.state_entity || "", vstate: e.show_state ?? (this._config.show_state !== false), vmin: e.min_position ?? 0 }, (v) => {
           const o = { entity: e.entity };
-          if (v.vname) o.name = v.vname; if (v.vcolor) o.color = rgb2hex(v.vcolor); if (v.state_entity) o.state_entity = v.state_entity;
+          if (v.vname) o.name = v.vname; if (v.vcolor) o.color = rgb2hex(v.vcolor); if (v.state_entity) o.state_entity = v.state_entity; if (Number(v.vmin) > 0) o.min_position = Number(v.vmin);
           if (v.vstate !== (this._config.show_state !== false)) o.show_state = !!v.vstate;
           this._config.groups[i].entities[j] = Object.keys(o).length === 1 ? e.entity : o; this._emit(); }));
         per.appendChild(row);
@@ -358,6 +381,7 @@ class HolmCoversCardEditor extends HTMLElement {
 }
 if (!customElements.get("holm-covers-card-editor")) customElements.define("holm-covers-card-editor", HolmCoversCardEditor);
 if (!customElements.get("holm-covers-card")) customElements.define("holm-covers-card", HolmCoversCard);
+console.info(`%c HOLM-COVERS-CARD %c v${VERSION} `, "color:#fff;background:#0abfbf;font-weight:700", "color:#0abfbf;background:#222");
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "holm-covers-card", name: "HOLM – Volets", description: "Volets compacts par étage ou volet seul : appui court ouvre/ferme, appui long affiche le curseur de position, couleurs par groupe, capteurs d'ouverture", preview: false });
 })();
