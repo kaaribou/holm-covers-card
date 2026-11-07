@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+- **Position la plus fermée** ([#7](https://github.com/kaaribou/holm-covers-card/issues/7), d'après la [PR #8](https://github.com/kaaribou/holm-covers-card/pull/8) de @developpeurbox) : option `min_position` (carte, groupe ou volet ; le volet l'emporte). Le bouton ▼, « Tout fermer », « Tous » ▼ et l'appui court envoient `set_cover_position` à cette position au lieu de `close_cover` ; curseur et raccourcis bornés (zone hachurée, raccourcis grisés) ; un volet à sa position la plus fermée s'affiche « Fermé » et ne compte plus comme ouvert. Avec « Tous », les membres du groupe `all` non affichés se ferment normalement. Sans `min_position`, les commandes sont strictement les mêmes qu'avant. Réglages dans l'éditeur, 8 langues.
+- **Masquer les compteurs** ([#6](https://github.com/kaaribou/holm-covers-card/issues/6)) : `show_counts: false` masque les « x/y ouverts » de l'en-tête et des groupes.
+- Version affichée dans la console du navigateur.
+- README en anglais (`README.en.md`).
+
+## 1.3.0
+- **8 langues** : français, anglais, allemand, espagnol, italien, néerlandais, portugais et polonais, carte et éditeur. Langue du profil Home Assistant (anglais si la langue n'est pas traduite) ; option `language`.
+
 ## 1.2.0
 - **Une couleur par groupe** ([#4](https://github.com/kaaribou/holm-covers-card/issues/4)) : `color` colore les icônes et le titre du groupe ; `tint` ajoute un fond teinté (`tint_opacity`) ; `color` aussi possible volet par volet.
 - **Volets sans retour d'état** ([#3](https://github.com/kaaribou/holm-covers-card/issues/3)) : `show_state: false` (carte ou volet) masque « Ouvert / Fermé », la position et la jauge ; `state_entity` affiche l'état d'après un capteur d'ouverture (binary_sensor). Les compteurs « ouverts » ne comptent que les volets dont l'état est connu.
